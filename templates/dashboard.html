@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Load Balancer Metrics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        h1 {
+            text-align: center;
+        }
+        canvas {
+            max-width: 800px;
+            margin: 20px auto;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Load Balancer Metrics</h1>
+    <canvas id="statusChart"></canvas>
+    <canvas id="responseTimeChart"></canvas>
+    <canvas id="weightChart"></canvas>
+
+    <script>
+        const apiEndpoint = "/api/metrics";
+
+        // Charts
+        let statusChart, responseTimeChart, weightChart;
+
+        // Fetch metrics and update charts
+        async function fetchMetrics() {
+            const response = await fetch(apiEndpoint);
+            const metrics = await response.json();
+
+            const labels = metrics.map(server => `${server.host}:${server.port}`);
+            const statuses = metrics.map(server => server.status === "UP" ? 1 : 0);
+            const responseTimes = metrics.map(server => server.response_time);
+            const weights = metrics.map(server => server.weight);
+
+            // Update status chart
+            if (statusChart) {
+                statusChart.data.labels = labels;
+                statusChart.data.datasets[0].data = statuses;
+                statusChart.update();
+            }
+
+            // Update response time chart
+            if (responseTimeChart) {
+                responseTimeChart.data.labels = labels;
+                responseTimeChart.data.datasets[0].data = responseTimes;
+                responseTimeChart.update();
+            }
+
+            // Update weight chart
+            if (weightChart) {
+                weightChart.data.labels = labels;
+                weightChart.data.datasets[0].data = weights;
+                weightChart.update();
+            }
+        }
+
+        function createCharts() {
+            const ctxStatus = document.getElementById("statusChart").getContext("2d");
+            const ctxResponseTime = document.getElementById("responseTimeChart").getContext("2d");
+            const ctxWeight = document.getElementById("weightChart").getContext("2d");
+
+            // Status chart
+            statusChart = new Chart(ctxStatus, {
+                type: "bar",
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: "Server Status (1 = UP, 0 = DOWN)",
+                        data: [],
+                        backgroundColor: "rgba(75, 192, 192, 0.2)",
+                        borderColor: "rgba(75, 192, 192, 1)",
+                        borderWidth: 1,
+                    }],
+                },
+                options: {
+                    scales: {
+                        y: { beginAtZero: true },
+                    },
+                },
+            });
+
+            // Response time chart
+            responseTimeChart = new Chart(ctxResponseTime, {
+                type: "line",
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: "Response Time (seconds)",
+                        data: [],
+                        backgroundColor: "rgba(255, 99, 132, 0.2)",
+                        borderColor: "rgba(255, 99, 132, 1)",
+                        borderWidth: 1,
+                    }],
+                },
+                options: {
+                    scales: {
+                        y: { beginAtZero: true },
+                    },
+                },
+            });
+
+            // Weight chart
+            weightChart = new Chart(ctxWeight, {
+                type: "bar",
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: "Server Weight",
+                        data: [],
+                        backgroundColor: "rgba(54, 162, 235, 0.2)",
+                        borderColor: "rgba(54, 162, 235, 1)",
+                        borderWidth: 1,
+                    }],
+                },
+                options: {
+                    scales: {
+                        y: { beginAtZero: true },
+                    },
+                },
+            });
+        }
+
+        // Initialize charts and start polling
+        createCharts();
+        setInterval(fetchMetrics, 5000); // Fetch metrics every 5 seconds
+    </script>
+</body>
+</html>
