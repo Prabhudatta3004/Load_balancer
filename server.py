@@ -1,83 +1,41 @@
-import asyncio
-import sys
-import random
-import logging
+import argparse
+from flask import Flask, jsonify, request
+import time
 
-logging.basicConfig(level=logging.INFO, format="[Server] %(message)s")
-logger = logging.getLogger(__name__)
+app = Flask(__name__)
 
-ERROR_RATE = 0.1
+# Simulated server state
+server_state = {
+    "healthy": True,
+    "delay": 0,
+}
 
-
-async def handle_client(data, reader, writer):
-    message = data.decode('utf-8', errors='ignore')
-    addr = writer.get_extra_info('peername')
-    logger.info(f"Received request from {addr}")
-
-    if random.random() < ERROR_RATE:
-        logger.warning("Simulating error.")
-        response = (
-            "HTTP/1.1 500 Internal Server Error\r\n"
-            "Content-Type: text/plain\r\n"
-            "Connection: close\r\n\r\n"
-            "Simulated Server Error\n"
-        )
-        writer.write(response.encode('utf-8'))
-        await writer.drain()
-        writer.close()
-        await writer.wait_closed()
-        return
-
-    response = (
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/plain\r\n"
-        "Connection: close\r\n\r\n"
-        "Hello from the server!\n"
-    )
-    writer.write(response.encode('utf-8'))
-    await writer.drain()
-    writer.close()
-    await writer.wait_closed()
-
-
-async def health_handler(reader, writer):
-    response = (
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/plain\r\n"
-        "Connection: close\r\n\r\n"
-        "OK"
-    )
-    writer.write(response.encode('utf-8'))
-    await writer.drain()
-    writer.close()
-    await writer.wait_closed()
-
-
-async def dispatcher(reader, writer):
-    data = await reader.read(1024)
-    if b"health" in data.lower():
-        await health_handler(reader, writer)
+@app.route('/health', methods=['GET'])
+def health_check():
+    if server_state["healthy"]:
+        return jsonify({"status": "UP"}), 200
     else:
-        await handle_client(data, reader, writer)
+        return jsonify({"status": "DOWN"}), 500
 
+@app.route('/process', methods=['POST'])
+def process_request():
+    time.sleep(server_state["delay"])
+    if not server_state["healthy"]:
+        return jsonify({"error": "Server is down"}), 500
+    data = request.json
+    return jsonify({"status": "success", "message": f"Processed data: {data}"}), 200
 
-async def mock_backend_server(host='127.0.0.1', port=9000, error_rate=0.1):
-    global ERROR_RATE
-    ERROR_RATE = error_rate
+@app.route('/simulate', methods=['POST'])
+def simulate():
+    data = request.json
+    server_state["healthy"] = data.get("healthy", True)
+    server_state["delay"] = data.get("delay", 0)
+    return jsonify({"status": "Simulation updated"}), 200
 
-    server = await asyncio.start_server(dispatcher, host, port)
-    addr = server.sockets[0].getsockname()
-    logger.info(f"Running on {addr} with ERROR_RATE={ERROR_RATE:.2f}")
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Run mock server.")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host IP")
+    parser.add_argument("--port", type=int, default=9001, help="Port number")
+    args = parser.parse_args()
 
-    async with server:
-        await server.serve_forever()
-
-
-def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 9000
-    error_rate = float(sys.argv[2]) if len(sys.argv) > 2 else 0.1
-    asyncio.run(mock_backend_server(port=port, error_rate=error_rate))
-
-
-if __name__ == "__main__":
-    main()
+    app.run(host=args.host, port=args.port)
