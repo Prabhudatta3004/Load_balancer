@@ -1,64 +1,67 @@
-import argparse
-from flask import Flask, jsonify, request
+#!/usr/bin/env python3
+"""
+servers.py
+Runs three Flask servers: ServerA, ServerB, ServerC.
+Each server has endpoints to simulate CPU spikes, ping fail, or HTTP fail.
+"""
+import threading
 import time
-import psutil  # For CPU utilization
+import random
+from flask import Flask, request
 
-app = Flask(__name__)
+def create_server(name, port):
+    app = Flask(name)
 
-# Simulated server state
-server_state = {
-    "healthy": True,   # Indicates whether the server is healthy
-    "delay": 0,        # Simulated processing delay in seconds
-}
+    # "Failure modes" we can toggle
+    # - "normal": Everything works
+    # - "cpu_spike": CPU usage is artificially high
+    # - "ping_fail": We will simulate "network" fail by ignoring ping (we'll see how LB interprets it)
+    # - "http_fail": Return HTTP 5xx from main endpoint
+    server_state = {"mode": "normal"}
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """
-    Health check endpoint to return server health status and CPU utilization.
-    """
-    cpu_utilization = psutil.cpu_percent(interval=0.1)  # Measure CPU utilization
-    if server_state["healthy"]:
-        return jsonify({
-            "status": "UP",
-            "cpu_utilization": cpu_utilization
-        }), 200
-    else:
-        return jsonify({
-            "status": "DOWN",
-            "cpu_utilization": cpu_utilization
-        }), 500
+    @app.route("/")
+    def index():
+        if server_state["mode"] == "http_fail":
+            return f"{name} is failing HTTP (simulated)!", 500
+        else:
+            return f"Hello from {name} (mode={server_state['mode']})"
 
-@app.route('/process', methods=['POST'])
-def process_request():
-    """
-    Simulates processing a request with optional delay and health state.
-    """
-    time.sleep(server_state["delay"])  # Blocking delay
-    if not server_state["healthy"]:
-        return jsonify({"error": "Server is down"}), 500
-    data = request.json
-    if data is None:
-        return jsonify({"error": "Invalid request. JSON data is required."}), 400
+    @app.route("/health")
+    def health():
+        """
+        Standard health endpoint. If the server is in normal or cpu_spike mode,
+        we return 200. If it's in http_fail, we also fail health. In real usage,
+        you might want separate logic for health vs. main endpoint.
+        """
+        if server_state["mode"] in ("normal", "cpu_spike"):
+            return "OK", 200
+        return f"Health fail: {server_state['mode']}", 500
 
-    return jsonify({
-        "status": "success",
-        "message": f"Processed data: {data}"
-    }), 200
+    @app.route("/simulate", methods=["POST"])
+    def simulate_failure():
+        """
+        POST /simulate?mode=xxx
+        Example: /simulate?mode=http_fail
+        """
+        mode = request.args.get("mode", "normal")
+        server_state["mode"] = mode
+        return f"{name} mode set to {mode}", 200
 
-@app.route('/simulate', methods=['POST'])
-def simulate():
-    """
-    Allows dynamic simulation of server behavior by updating health state and delay.
-    """
-    data = request.json
-    server_state["healthy"] = data.get("healthy", True)
-    server_state["delay"] = data.get("delay", 0)
-    return jsonify({"status": "Simulation updated"}), 200
+    def run_app():
+        app.run(host="0.0.0.0", port=port, debug=False)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Run mock server.")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host IP")
-    parser.add_argument("--port", type=int, default=9001, help="Port number")
-    args = parser.parse_args()
+    return run_app
 
-    app.run(host=args.host, port=args.port)
+if __name__ == "__main__":
+    # Create threads for each server
+    serverA = threading.Thread(target=create_server("ServerA", 9001))
+    serverB = threading.Thread(target=create_server("ServerB", 9002))
+    serverC = threading.Thread(target=create_server("ServerC", 9003))
+
+    serverA.start()
+    serverB.start()
+    serverC.start()
+
+    # Keep main thread alive
+    while True:
+        time.sleep(1)

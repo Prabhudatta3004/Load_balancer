@@ -1,103 +1,68 @@
-import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
+#!/usr/bin/env python3
+"""
+dashboard.py
+Displays metrics from lb.py in an HTML table, including circuit breaker fields.
+"""
 import requests
-import plotly.graph_objs as go
+from flask import Flask, render_template_string
 
-# Define the metrics endpoint
-METRICS_URL = "http://127.0.0.1:8080/metrics"
+app = Flask(__name__)
 
-# Initialize Dash app
-app = dash.Dash(__name__)
-app.title = "Load Balancer Metrics Dashboard"
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>LB Dashboard</title>
+</head>
+<body>
+    <h1>Load Balancer Dashboard</h1>
+    <p>Metrics from <code>{{ lb_url }}</code></p>
+    <table border="1" cellpadding="5">
+        <tr>
+            <th>Server</th>
+            <th>CB State</th>
+            <th>Consecutive Failures</th>
+            <th>Ping (ms)</th>
+            <th>HTTP OK</th>
+            <th>CPU (%)</th>
+            <th>Weight</th>
+            <th>Requests Forwarded</th>
+        </tr>
+        {% for name, data in metrics.items() %}
+        <tr>
+            <td>{{ name }}</td>
+            <td>{{ data.cb_state }}</td>
+            <td>{{ data.consecutive_failures }}</td>
+            <td>{{ data.ping_ms if data.ping_ms else 9999 }}</td>
+            <td>{{ data.http_ok }}</td>
+            <td>{{ "%.1f"|format(data.cpu_usage) }}</td>
+            <td>{{ "%.4f"|format(data.weight) }}</td>
+            <td>{{ data.requests_forwarded }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    <p><a href="#" onclick="location.reload();">Refresh</a></p>
+</body>
+</html>
+"""
 
-# Define layout
-app.layout = html.Div([
-    html.H1("Load Balancer Metrics Dashboard", style={"textAlign": "center"}),
 
-    dcc.Interval(
-        id="update-interval",
-        interval=2000,  # Update every 2 seconds
-        n_intervals=0
-    ),
-
-    html.Div(id="graphs-container", style={"marginTop": "20px"}),
-
-    html.Div(id="error-container", style={"textAlign": "center", "color": "red", "marginTop": "20px"}),
-])
-
-
-def fetch_metrics():
-    """
-    Fetch metrics from the load balancer's /metrics endpoint.
-    """
+@app.route("/")
+def index():
+    lb_url = "http://127.0.0.1:5100/metrics"
     try:
-        response = requests.get(METRICS_URL, timeout=5)  # Set timeout to avoid hanging
-        if response.status_code == 200:
-            return response.json()
+        resp = requests.get(lb_url, timeout=2)
+        data = resp.json()
+        return render_template_string(
+            HTML_TEMPLATE, metrics=data, lb_url=lb_url
+        )
     except Exception as e:
-        print(f"Error fetching metrics: {e}")
-    return []
-
-
-@app.callback(
-    [Output("graphs-container", "children"), Output("error-container", "children")],
-    [Input("update-interval", "n_intervals")]
-)
-def update_graphs(n):
-    """
-    Updates graphs with the latest metrics data.
-    """
-    metrics = fetch_metrics()
-
-    if not metrics:
-        return [], "Error: Unable to fetch metrics from /metrics endpoint."
-
-    # Extract metrics data
-    server_names = [f"{m['host']}:{m['port']}" for m in metrics]
-    dynamic_weights = [m.get("dynamic_weight", 0) for m in metrics]
-    response_times = [m.get("response_time", 0) for m in metrics]
-    cpu_utilizations = [m.get("cpu_utilization", 0) for m in metrics]
-    statuses = [m["status"] for m in metrics]
-
-    # Create graphs
-    graphs = []
-
-    # Traffic distribution (Dynamic Weight)
-    graphs.append(dcc.Graph(
-        id="traffic-distribution",
-        figure=go.Figure(
-            data=[go.Bar(x=server_names, y=dynamic_weights, name="Dynamic Weight", marker_color="blue")],
-            layout=go.Layout(title="Traffic Distribution (Dynamic Weights)", xaxis={"title": "Servers"}, yaxis={"title": "Dynamic Weight"})
-        )
-    ))
-
-    # Response time graph
-    graphs.append(dcc.Graph(
-        id="response-time",
-        figure=go.Figure(
-            data=[go.Bar(x=server_names, y=response_times, name="Response Time", marker_color="green")],
-            layout=go.Layout(title="Response Times", xaxis={"title": "Servers"}, yaxis={"title": "Response Time (s)"})
-        )
-    ))
-
-    # CPU Utilization graph
-    graphs.append(dcc.Graph(
-        id="cpu-utilization",
-        figure=go.Figure(
-            data=[go.Bar(x=server_names, y=cpu_utilizations, name="CPU Utilization", marker_color="orange")],
-            layout=go.Layout(title="CPU Utilization", xaxis={"title": "Servers"}, yaxis={"title": "CPU Usage (%)"})
-        )
-    ))
-
-    # Server status
-    graphs.append(html.Div([
-        html.H3("Server Status", style={"textAlign": "center", "marginTop": "20px"}),
-        html.Ul([html.Li(f"{name}: {'🟢 UP' if status == 'UP' else '🔴 DOWN'}") for name, status in zip(server_names, statuses)], style={"listStyleType": "none", "textAlign": "left", "paddingLeft": "20px"})
-    ]))
-
-    return graphs, ""
+        return f"Error fetching LB metrics: {e}"
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=8080
+    )
