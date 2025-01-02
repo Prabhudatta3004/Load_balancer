@@ -1,9 +1,5 @@
-<<<<<<< HEAD
 
-```Load Balancer with Real-Time Monitoring Dashboard```
-=======
 Load Balancer with Real-Time Monitoring Dashboard
->>>>>>> 0db907e ( Made changes to the code)
 
 This project implements a Hybrid Load Balancer with advanced features such as dynamic weight-based load distribution, circuit breaker mechanisms, and sticky sessions. It also includes a real-time monitoring dashboard to visualize server metrics like status, response times, weights, and loads.
 

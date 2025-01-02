@@ -7,9 +7,6 @@ import os
 async def ping_check(server):
     """
     Performs a ping check to verify basic network connectivity.
-
-    Args:
-        server (Server): The server instance.
     """
     response = os.system(f"ping -c 1 {server.host} > /dev/null 2>&1")  # Ping once, suppress output
     return response == 0
@@ -18,73 +15,56 @@ async def ping_check(server):
 async def http_check(server, timeout=2):
     """
     Performs an HTTP health check to ensure the server responds correctly.
-
-    Args:
-        server (Server): The server instance.
-        timeout (int): Timeout for the health check request.
-
-    Returns:
-        tuple: (status, response_time). Status is 'UP' or 'DOWN', response_time is the measured latency.
     """
-    url = f"http://{server.host}:{server.port}/health"  # Target the server's /health endpoint
+    url = f"http://{server.host}:{server.port}/health"
     start_time = time.time()  # Record start time for measuring response latency
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=timeout) as response:
                 if response.status == 200:
+                    data = await response.json()  # Parse JSON response
                     response_time = time.time() - start_time
-                    return "UP", response_time
-    except Exception:
-        pass  # Handle connection errors or timeouts gracefully
-    return "DOWN", float("inf")
+                    cpu_utilization = data.get("cpu_utilization", 0.0)  # Get CPU utilization if provided
+                    return "UP", response_time, cpu_utilization
+    except Exception as e:
+        print(f"[HealthCheck] HTTP check failed for {server.host}:{server.port}: {e}")
+    return "DOWN", float("inf"), 0.0
 
 
-async def check_server(server, timeout=2):
+async def check_server(server, timeout=2, cpu_threshold=90):
     """
-    Performs a multi-layer health check (Ping and HTTP) on a server.
-
-    Args:
-        server (Server): The server instance.
-        timeout (int): Timeout for HTTP health check.
-
-    Returns:
-        tuple: (status, response_time). Status is 'UP' or 'DOWN', response_time is the measured latency.
+    Performs a multi-layer health check (Ping, HTTP, and CPU utilization) on a server.
     """
-    # Step 1: Ping Check
     if not await ping_check(server):
         print(f"[HealthCheck] Ping failed for {server.host}:{server.port}")
-        return "DOWN", float("inf")
+        return "DOWN", float("inf"), server.cpu_utilization
 
-    # Step 2: HTTP Check
-    status, response_time = await http_check(server, timeout)
-    if status == "UP":
-        return "UP", response_time
+    status, response_time, cpu_utilization = await http_check(server, timeout)
+    if status == "UP" and cpu_utilization <= cpu_threshold:
+        return "UP", response_time, cpu_utilization
 
-    return "DOWN", float("inf")
+    print(f"[HealthCheck] Server {server.host}:{server.port} is OVERLOADED or DOWN (CPU: {cpu_utilization}%)")
+    return "DOWN", response_time, cpu_utilization
 
 
-async def health_check(lb, stable_interval=5, unstable_interval=2):
+async def health_check(lb, stable_interval=5, unstable_interval=2, cpu_threshold=90):
     """
     Periodically performs health checks on all servers in the load balancer.
-
-    Args:
-        lb (HybridLoadBalancer): The load balancer instance.
-        stable_interval (int): Interval for stable servers.
-        unstable_interval (int): Interval for unstable servers.
     """
-    while True:  # Infinite loop to continuously check server health
-        for server in lb.servers:
-            # Dynamic interval based on server stability
-            interval = unstable_interval if server.status == "DOWN" else stable_interval
-            status, response_time = await check_server(server)
+    while True:
+        health_check_tasks = [
+            check_server(server, cpu_threshold=cpu_threshold) for server in lb.servers
+        ]
+        results = await asyncio.gather(*health_check_tasks)
 
-            # Update server status and log results
+        for i, server in enumerate(lb.servers):
+            status, response_time, cpu_utilization = results[i]
             server.status = status
             server.response_time = response_time
+            server.cpu_utilization = cpu_utilization
+            print(
+                f"[HealthCheck] Server {server.host}:{server.port} | Status: {status} | "
+                f"Response Time: {response_time:.2f}s | CPU: {cpu_utilization:.2f}%"
+            )
 
-            if status == "DOWN":
-                print(f"[HealthCheck] Server {server.host}:{server.port} is DOWN.")
-            else:
-                print(f"[HealthCheck] Server {server.host}:{server.port} is UP (Response Time: {response_time:.2f}s).")
-            
-            await asyncio.sleep(interval)  # Wait for the interval before the next check
+        await asyncio.sleep(stable_interval)
