@@ -14,7 +14,6 @@ Features
 	•	Simulates server responses with configurable error rates for testing.
 	•	Supports /health endpoint for health checks.
 	3.	Real-Time Dashboard:
-	•	Built using Flask and Chart.js.
 	•	Visualizes:
 	•	Server Status: Indicates whether a server is UP or DOWN.
 	•	Response Times: Tracks server latency.
